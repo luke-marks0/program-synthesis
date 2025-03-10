@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
-from .logic_layer import LogicLayer, ALL_OPERATIONS
+from .logic_layer import LogicLayer
+from .operators import ALL_OPERATIONS
+from .group_sum import GroupSum
 
 
 class LogicGateNetwork(nn.Module):
@@ -8,6 +10,7 @@ class LogicGateNetwork(nn.Module):
     Complete network of logic gate layers for program synthesis tasks.
     """
     def __init__(self, input_dim, hidden_dims, output_dim, 
+                 neurons_per_output=16, tau=1.0,
                  connections='random', device='cpu', grad_factor=1.0):
         """
         Initialize a logic gate network.
@@ -15,7 +18,9 @@ class LogicGateNetwork(nn.Module):
         Args:
             input_dim: Dimension of input
             hidden_dims: List of hidden layer dimensions
-            output_dim: Dimension of output
+            output_dim: Dimension of output (number of output bits)
+            neurons_per_output: Number of neurons per output bit
+            tau: Temperature parameter for scaling
             connections: Connection pattern ('random' or 'unique')
             device: Device to use ('cpu' or 'cuda')
             grad_factor: Gradient scaling factor
@@ -24,10 +29,13 @@ class LogicGateNetwork(nn.Module):
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.hidden_dims = hidden_dims
+        self.neurons_per_output = neurons_per_output
+        self.tau = tau
         self.device = device
         
         layers = []
         prev_dim = input_dim
+        total_output_neurons = output_dim * neurons_per_output
         
         for i, dim in enumerate(hidden_dims):
             # scale grad factor with layer depth
@@ -41,6 +49,8 @@ class LogicGateNetwork(nn.Module):
                                 grad_factor * (1.5 ** len(hidden_dims))))
         
         self.layers = nn.ModuleList(layers)
+
+        self.group_sum = GroupSum(output_dim, tau, device)
     
     def forward(self, x):
         """
@@ -54,6 +64,9 @@ class LogicGateNetwork(nn.Module):
         """
         for layer in self.layers:
             x = layer(x)
+
+        x = self.group_sum(x)
+
         return x
     
     def get_gates(self):

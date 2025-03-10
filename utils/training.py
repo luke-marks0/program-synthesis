@@ -27,7 +27,7 @@ def train_model(model, train_loader, val_loader, config, save_dir=None):
     weight_decay = config.get('weight_decay', 0.0)
     patience = config.get('patience', 20)
     
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.BCELoss()
     
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     
@@ -52,8 +52,7 @@ def train_model(model, train_loader, val_loader, config, save_dir=None):
         'epoch_times': []
     }
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model.to(device)
+    device = next(model.parameters()).device
     
     print(f"Starting training for {num_epochs} epochs on {device}...")
     
@@ -68,6 +67,9 @@ def train_model(model, train_loader, val_loader, config, save_dir=None):
         total_bits = 0
         
         progress_bar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} [Train]")
+
+        sample_outputs = None
+        sample_targets = None
         
         for inputs, targets in progress_bar:
             inputs, targets = inputs.to(device), targets.to(device)
@@ -80,17 +82,21 @@ def train_model(model, train_loader, val_loader, config, save_dir=None):
             
             train_loss += loss.item() * inputs.size(0)
             
-            predictions = (torch.sigmoid(outputs) > 0.5).float()
+            predictions = (outputs > 0.5).float()
             correct_examples += (predictions == targets).all(dim=1).sum().item()
             correct_bits += (predictions == targets).sum().item()
             total_examples += inputs.size(0)
             total_bits += targets.numel()
+
+            if sample_outputs is None:
+                sample_outputs = outputs.detach().clone()
+                sample_targets = targets.detach().clone()
             
             progress_bar.set_postfix({
                 'loss': loss.item(),
                 'acc': correct_examples / total_examples
             })
-        
+
         train_loss = train_loss / total_examples
         train_acc = correct_examples / total_examples
         train_bit_acc = correct_bits / total_bits
@@ -112,13 +118,12 @@ def train_model(model, train_loader, val_loader, config, save_dir=None):
                 loss = criterion(outputs, targets)
                 val_loss += loss.item() * inputs.size(0)
                 
-                predictions = (torch.sigmoid(outputs) > 0.5).float()
+                predictions = (outputs > 0.5).float()
                 correct_examples += (predictions == targets).all(dim=1).sum().item()
                 correct_bits += (predictions == targets).sum().item()
-                
                 total_examples += inputs.size(0)
                 total_bits += targets.numel()
-                
+
                 progress_bar.set_postfix({
                     'loss': loss.item(),
                     'acc': correct_examples / total_examples
@@ -129,21 +134,6 @@ def train_model(model, train_loader, val_loader, config, save_dir=None):
         val_bit_acc = correct_bits / total_bits
         
         scheduler.step(val_loss)
-        
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_epoch = epoch
-            epochs_no_improve = 0
-            
-            if save_dir:
-                os.makedirs(save_dir, exist_ok=True)
-                torch.save(model.state_dict(), os.path.join(save_dir, 'best_model.pt'))
-        else:
-            epochs_no_improve += 1
-        
-        if epochs_no_improve >= patience:
-            print(f"Early stopping at epoch {epoch+1}. Best epoch: {best_epoch+1}")
-            break
         
         epoch_time = time.time() - start_time
         
@@ -163,7 +153,7 @@ def train_model(model, train_loader, val_loader, config, save_dir=None):
               f"Val Loss: {val_loss:.4f} | "
               f"Val Acc: {val_acc:.4f} | "
               f"Val Bit Acc: {val_bit_acc:.4f}")
-    
+
     if save_dir and os.path.exists(os.path.join(save_dir, 'best_model.pt')):
         model.load_state_dict(torch.load(os.path.join(save_dir, 'best_model.pt')))
     
@@ -191,12 +181,15 @@ def evaluate_model(model, test_loader):
     total_examples = 0
     total_bits = 0
     
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.BCELoss()
     
     progress_bar = tqdm(test_loader, desc="Evaluation")
     
     all_preds = []
     all_targets = []
+
+    sample_outputs = None
+    sample_targets = None
     
     with torch.no_grad():
         for inputs, targets in progress_bar:
@@ -205,7 +198,7 @@ def evaluate_model(model, test_loader):
             outputs = model(inputs)
             loss = criterion(outputs, targets)
             test_loss += loss.item() * inputs.size(0)
-            predictions = (torch.sigmoid(outputs) > 0.5).float()
+            predictions = (outputs > 0.5).float()
             
             all_preds.append(predictions.cpu())
             all_targets.append(targets.cpu())

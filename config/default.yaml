@@ -4,17 +4,19 @@ models_dir: "output/models"
 
 problem:
   name: "adder"  # "adder", "multiplier", "parity", "sorter"
-  bits: 2        # Number of bits for each input number
+  bits: 5        # Number of bits for each input number
   num_samples: 1000000000  # Number of samples to generate, will cap out at the max for that number of bits
 
 model:
-  hidden_dims: [16, 16, 8]
+  hidden_dims: [32, 16]
+  neurons_per_output: 4
+  tau: 0.2
   device: "cuda"  # "cpu" or "cuda"
   grad_factor: 1.0
 
 training:
-  num_epochs: 20
-  batch_size: 4
-  learning_rate: 0.001
-  weight_decay: 0.0001
+  num_epochs: 100
+  batch_size: 64
+  learning_rate: 0.01
+  weight_decay: 0.0
   train_ratio: 0.8
